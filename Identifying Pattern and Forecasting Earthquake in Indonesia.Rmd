@@ -1,0 +1,326 @@
+---
+title: "Identifying Pattern and Forecasting Earthquake in Indonesia"
+author: "Julius Viktor Liegata"
+date: "2023-10-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+```{r}
+library(grid)
+library(tidyverse)
+library(sf)
+library(rnaturalearth)
+library(scales)
+library(naniar)
+library(ggplot2)
+library(RColorBrewer)
+library(rvest)
+```
+
+```{r}
+earthquake_list <- read_tsv("//Users/julius/Monash/FIT5145/Assignment_3/Earthquake_dataset/katalog_gempa_v2.tsv")
+earthquake_list <- earthquake_list[, 2:11]
+```
+
+```{r}
+#seperate one of the column
+location_list <- strsplit(earthquake_list$location,",")
+
+location_list_df <- do.call(rbind.data.frame,location_list)
+
+colnames(location_list_df) <- c("province","area")
+
+earthquake_list <- cbind(earthquake_list,location_list_df)
+
+```
+
+```{r}
+#altering the datasets
+
+#specifying the data that will be dropped
+column_drop <- c("eventID","azimuth_gap","phasecount")
+
+earthquake_list <- earthquake_list[, !names(earthquake_list) %in% column_drop]
+
+```
+
+```{r}
+#seperating datetime into two different column
+datetime <- ymd_hms(earthquake_list$datetime)
+
+earthquake_list$Date <- date(earthquake_list$datetime)
+earthquake_list$Time <- format(earthquake_list$datetime, format = "%H:%M:%S")
+```
+
+
+```{r}
+#removing datetime column
+earthquake_list <- earthquake_list[, -1]
+```
+
+```{R}
+earthquake_list <- earthquake_list%>%
+  select(Date,Time,everything())
+```
+
+```{r}
+#removing white space
+earthquake_list$area <- trimws(earthquake_list$area)
+```
+```{r}
+#categorizing the strength of the earthquake
+
+earthquake_list$magn_category <- 
+earthquake_list$magn_category <- ifelse(
+  earthquake_list$magnitude <= 2.5, "Not Felt",
+  ifelse(
+    earthquake_list$magnitude > 2.5 & earthquake_list$magnitude <= 5.4, "Minor Damage",
+    ifelse(
+      earthquake_list$magnitude > 5.4 & earthquake_list$magnitude <= 6.0, "Slight Damage",
+      ifelse(
+        earthquake_list$magnitude > 6.0 & earthquake_list$magnitude <= 6.9, "Moderate Damage",
+        ifelse(
+          earthquake_list$magnitude > 6.9 & earthquake_list$magnitude <= 7.9, "Major Damage",
+          ifelse(
+            earthquake_list$magnitude > 7.9, "Great Earthquake",
+            "Unknown"
+          )
+        )
+      )
+    )
+  )
+)
+```
+
+```{r}
+#analysis 1
+#showing the number of earthquake by the year
+earthquake_list <- earthquake_list %>%
+  mutate(year = as.integer(format(Date, "%Y")))
+
+#merging the datasets
+occurance_plot <- earthquake_list %>%
+  group_by(year,magn_category) %>%
+  summarise(occurance = n()) %>%
+  ggplot(aes(x = year, y = occurance, fill = magn_category))+
+  scale_y_log10()+
+  geom_bar(stat = "identity" ,position = "dodge")+
+  labs(title = "Range Of Earthquake Damage By The Year", x = "Years", y = "Number Of Occurance",fill = "Damage Categories")
+occurance_plot
+```
+
+```{r}
+library(jsonlite)
+```
+
+
+```{r}
+#creating a indonesian map
+#read json file
+indonesia_regions <- fromJSON("/Users/julius/Monash/FIT5145/Assignment_3/indonesia-geojson-master/indonesia-province.json")
+
+ID <- indonesia_regions$features
+
+```
+
+```{r}
+library(geojsonio)
+library(broom)
+```
+
+```{r}
+indonesian_map <- geojson_read("https://raw.githubusercontent.com/superpikar/indonesia-geojson/master/indonesia-en.geojson", what = "sp")
+
+indonesia_map_fortified <- tidy(indonesian_map)
+```
+
+```{r}
+#plotting the map 
+indonesia_map_plot <- indonesia_map_fortified %>% 
+  ggplot() +
+  geom_polygon(
+    data = indonesia_map_fortified,
+    aes(x = long, y = lat, group = group, fill =long),
+  ) +
+  scale_fill_gradient(low = "#99aa33", high = "#dd9900") +  # Specify the gradient colors
+  theme_void() +
+  guides(fill = "none")+
+  coord_map()
+
+indonesia_map_plot
+
+```
+```{r}
+#altering the main file more
+area_to_drop <- c("East of Philippine Islands","Mindanao","Northwest of Australia","Philippine Islands Region","South China Sea","South Indian Ocean","Sulu Archipelago","Timor Region","Timor Sea","Western Australia")
+
+earthquake_list_2 <- earthquake_list %>%
+  filter(!(province %in% area_to_drop))
+```
+
+```{r}
+#altering the name to fit the json files
+
+maluku_islands <- c("Aru Islands Region","Banda Sea","Buru","Ceram Sea","Halmahera","North of Halmahera","Northern Molucca Sea","Seram","Tanimbar Islands Reg.","Tanimbar Islands Region")
+
+nusa_tenggara <- c("Bali Region","Bali Sea","Flores Region","Flores Sea","Savu Sea","South of Sumba","South of Sumbawa","Sumba Region","Sumbawa Region")
+
+borneo <- c("Borneo","Malay Peninsula")
+
+sulawesi <- c("Celebes Sea","Minahassa Peninsula","Sulawesi","Talaud Islands")
+
+papua <- c("Irian Jaya","Irian Jaya Region","Near North Coast of Irian Jaya","Near North Coast of West Papua","Neara South Coast of Irian Jaya","nNew Guinea","W. Caroline Islands","West Papua","West Papua Region")
+
+java <- c("Java","Java Sea","South of Java")
+
+sumatera <- c("Nicobar Islands","Northern Sumatra","Off West Coast of Northern Sumatra","Southern Sumatra","Southwest of Sumatra","Sunda Strait")
+
+earthquake_list_3 <- earthquake_list_2 %>%
+  mutate(regions = case_when(province %in% maluku_islands ~ "Maluku Islands",
+                             province %in% nusa_tenggara ~ "Nusa Tenggara",
+                             province %in% borneo ~ "Borneo",
+                             province %in% sulawesi ~ "Sulawesi",
+                             province %in% papua ~ "Papua",
+                             province %in% java ~ "Java",
+                             province %in% sumatera ~ "Sumatera",
+                             TRUE ~ "Other"
+  ))
+
+```
+
+```{r fig.height=10,fig.width=20}
+#analysis 2
+#filter the earthquakes
+
+earthquake_2022 <- earthquake_list_3 %>%
+  filter(year == 2022)
+
+earthquake_2022 <- earthquake_2022 %>%
+  filter(!(regions == "Other"))
+
+earthquake_time_series <- ggplot(earthquake_2022, aes(x = Date, y = magnitude))+
+  geom_line() +
+  facet_wrap(~regions, scales = "free_y", ncol =1) +
+  labs(title = "Time Series of Magnitude By Regions",x = "Date",y = "Magnitudes") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+earthquake_time_series
+
+#pie chart base on the year
+
+
+```
+```{r}
+earthquake_list_3 <- earthquake_list_3 %>%
+  filter(!(regions == "Other"))
+```
+
+
+
+```{r}
+#analysis 3
+magnitude_region_plot <- ggplot(earthquake_list_3, aes(x = regions, y = magnitude, fill = regions)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Earthquake Magnitude accross the regions",
+       x = "Regions",y = "Magnitude") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+magnitude_region_plot
+```
+
+```{r}
+earthquake_heatmap <- earthquake_list_3 %>%
+  group_by(regions,year) %>%
+  summarise(density = n()) %>%
+  ggplot() +
+  aes(x = year,y = regions, fill = density) +
+  geom_tile()+
+  scale_fill_distiller(palette = "Spectral") +  # Example palette
+  labs(title = "Earthquake Density Heatmap by Regions", x = "Year", y = "Regions", fill = "Earthquake   Density") +
+  theme_linedraw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_x_continuous(breaks = unique(earthquake_list_3$year)) +
+  geom_vline(xintercept = unique(earthquake_list_3$year), color = "black", linetype = "solid") 
+  
+
+ 
+earthquake_heatmap
+```
+```{r}
+earthquake_2022_months <- earthquake_2022 %>%
+  mutate(month = month(Date), days = day(Date))
+```
+
+
+```{r}
+#volcanoes
+
+volcanoes_indonesia <- read_csv("/Users/julius/Monash/FIT5145/Assignment_3/Volcanoes_data_Set/volcanoes around the world in 2021.csv")
+
+```
+```{r fig.height=10,fig.width=20}
+#analysis
+
+earthquake_last_5_year <- earthquake_list_3 %>%
+    filter(year >= 2017 & year <= 2022)
+
+#adding point map
+indonesia_map_plot_2<- indonesia_map_plot +
+  geom_point(
+    data = earthquake_2022,
+    aes(x = longitude, y = latitude, size = magnitude),
+    color = "red",
+    alpha = 0.25,
+  ) +
+  scale_size_continuous(range = c(0.1, 2.5))+
+  labs(title = "Point Map of Earthquake In Indonesia ", x = "Longitude", y = "Latitude", size = "Earthquake Point") +
+   theme_linedraw() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20))
+
+
+indonesia_map_plot_2
+
+
+```
+```{r fig.height=10,fig.width=20}
+
+volcanoes_indonesia <- volcanoes_indonesia %>%
+  filter(Country == "Indonesia")
+
+volcanoes_map <- indonesia_map_plot_2 +
+  geom_point(data = volcanoes_indonesia, aes(x = Longitude, y = Latitude, color = "Volcanoes"), size = 3, shape = 17)+
+  scale_color_manual(values = "#330000") +
+  guides(color = guide_legend(title = "Volcanoes"))
+
+volcanoes_map
+
+```
+
+
